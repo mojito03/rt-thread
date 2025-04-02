@@ -25,6 +25,7 @@
 import os
 import sys
 import string
+import shutil
 
 import xml.etree.ElementTree as etree
 from xml.etree.ElementTree import SubElement
@@ -87,12 +88,18 @@ def MDK4AddGroupForFN(ProjectFiles, parent, name, filename, project_path):
     if ProjectFiles.count(obj_name):
         name = basename + '_' + name
     ProjectFiles.append(obj_name)
-    file_name.text = name.decode(fs_encoding)
+    try: # python 2
+        file_name.text = name.decode(fs_encoding)
+    except: # python 3
+        file_name.text = name
     file_type = SubElement(file, 'FileType')
     file_type.text = '%d' % _get_filetype(name)
     file_path = SubElement(file, 'FilePath')
+    try: # python 2
+        file_path.text = path.decode(fs_encoding)
+    except: # python 3
+        file_path.text = path
 
-    file_path.text = path.decode(fs_encoding)
 
     return group
 
@@ -186,7 +193,7 @@ def MDK4AddGroup(ProjectFiles, parent, name, files, project_path, group_scons):
             MiscControls_text = MiscControls_text + group_scons['LOCAL_CXXFLAGS']
         if 'LOCAL_CCFLAGS' in group_scons:
             MiscControls_text = MiscControls_text + group_scons['LOCAL_CCFLAGS']
-        if MiscControls_text != ' ':
+        if MiscControls_text != ' ' or ('LOCAL_CPPDEFINES' in group_scons):
             FileOption     = SubElement(file,  'FileOption')
             FileArmAds     = SubElement(FileOption, 'FileArmAds')
             Cads            = SubElement(FileArmAds, 'Cads')
@@ -219,6 +226,8 @@ def MDK45Project(tree, target, script):
     CPPPATH = []
     CPPDEFINES = []
     LINKFLAGS = ''
+    CXXFLAGS = ''
+    CCFLAGS = ''
     CFLAGS = ''
     ProjectFiles = []
 
@@ -251,6 +260,28 @@ def MDK45Project(tree, target, script):
             else:
                 LINKFLAGS += group['LINKFLAGS']
 
+        # get each group's CXXFLAGS flags
+        if 'CXXFLAGS' in group and group['CXXFLAGS']:
+            if CXXFLAGS:
+                CXXFLAGS += ' ' + group['CXXFLAGS']
+            else:
+                CXXFLAGS += group['CXXFLAGS']
+
+        # get each group's CCFLAGS flags
+        if 'CCFLAGS' in group and group['CCFLAGS']:
+            if CCFLAGS:
+                CCFLAGS += ' ' + group['CCFLAGS']
+            else:
+                CCFLAGS += group['CCFLAGS']
+
+        # get each group's CFLAGS flags
+        if 'CFLAGS' in group and group['CFLAGS']:
+            if CFLAGS:
+                CFLAGS += ' ' + group['CFLAGS']
+            else:
+                CFLAGS += group['CFLAGS']
+
+        # get each group's LIBS flags
         if 'LIBS' in group and group['LIBS']:
             for item in group['LIBS']:
                 lib_path = ''
@@ -273,15 +304,11 @@ def MDK45Project(tree, target, script):
     Define = tree.find('Targets/Target/TargetOption/TargetArmAds/Cads/VariousControls/Define')
     Define.text = ', '.join(set(CPPDEFINES))
 
-    if ('CCFLAGS' in group and 'c99' in group['CCFLAGS']) or \
-       ('CFLAGS' in group and 'c99' in group['CFLAGS']) or \
-       ('CXXFLAGS' in group and 'c99' in group['CXXFLAGS']):
+    if 'c99' in CXXFLAGS or 'c99' in CCFLAGS or 'c99' in CFLAGS:
         uC99 = tree.find('Targets/Target/TargetOption/TargetArmAds/Cads/uC99')
         uC99.text = '1'
 
-    if ('CCFLAGS' in group and '--gnu' in group['CCFLAGS']) or \
-       ('CFLAGS' in group and '--gnu' in group['CFLAGS']) or \
-       ('CXXFLAGS' in group and '--gnu' in group['CXXFLAGS']):
+    if 'gnu' in CXXFLAGS or 'gnu' in CCFLAGS or 'gnu' in CFLAGS:
         uGnu = tree.find('Targets/Target/TargetOption/TargetArmAds/Cads/uGnu')
         uGnu.text = '1'
 
@@ -310,8 +337,27 @@ def MDK4Project(target, script):
     # copy uvopt file
     if os.path.exists('template.uvopt'):
         import shutil
-        shutil.copy2('template.uvopt', 'project.uvopt')
-
+        shutil.copy2('template.uvopt', '{}.uvopt'.format(os.path.splitext(target)[0]))
+import threading
+import time
+def monitor_log_file(log_file_path):
+    if not os.path.exists(log_file_path):
+        open(log_file_path, 'w').close()
+    empty_line_count = 0
+    with open(log_file_path, 'r') as log_file:
+        while True:
+            line = log_file.readline()
+            if line:
+                print(line.strip())
+                if 'Build Time Elapsed' in line:
+                    break
+                empty_line_count = 0
+            else:
+                empty_line_count += 1
+                time.sleep(1)
+            if empty_line_count > 30:
+                print("Timeout reached or too many empty lines, exiting log monitoring thread.")
+                break
 def MDK5Project(target, script):
 
     if os.path.isfile('template.uvprojx') is False:
@@ -329,7 +375,23 @@ def MDK5Project(target, script):
     # copy uvopt file
     if os.path.exists('template.uvoptx'):
         import shutil
-        shutil.copy2('template.uvoptx', 'project.uvoptx')
+        shutil.copy2('template.uvoptx', '{}.uvoptx'.format(os.path.splitext(target)[0]))
+        # build with UV4.exe
+
+        if shutil.which('UV4.exe') is not None:
+            target_name = template_tree.find('Targets/Target/TargetName')
+            print('target_name:', target_name.text)
+            log_file_path = 'keil.log'
+            if os.path.exists(log_file_path):
+                os.remove(log_file_path)
+            log_thread = threading.Thread(target=monitor_log_file, args=(log_file_path,))
+            log_thread.start()
+            cmd = 'UV4.exe -b project.uvprojx -q -j0 -t '+ target_name.text +' -o '+log_file_path
+            print('Start to build keil project')
+            print(cmd)
+            os.system(cmd)
+        else:
+            print('UV4.exe is not available, please check your keil installation')
 
 def MDK2Project(target, script):
     template = open('template.Uv2', "r")

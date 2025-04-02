@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006-2021, RT-Thread Development Team
+ * Copyright (c) 2006-2023, RT-Thread Development Team
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -16,10 +16,25 @@
 
 #include <rthw.h>
 #include <rtthread.h>
+#include <gicv3.h>
 #include "fparameters.h"
+#include "fio.h"
+#include "faarch.h"
+
+#ifdef RT_USING_SMART
+#include"ioremap.h"
+#endif
 
 #define ARM_GIC_MAX_NR 1
-#define MAX_HANDLERS 160
+
+#if defined(TARGET_FT2000_4) || defined(TARGET_D2000)
+    #define MAX_HANDLERS 160
+#endif
+
+#if defined(TARGET_E2000)
+    #define MAX_HANDLERS 270
+#endif
+
 #define GIC_IRQ_START 0
 #define GIC_ACK_INTID_MASK 0x000003ff
 
@@ -28,53 +43,63 @@ rt_uint64_t get_main_cpu_affval(void);
 
 rt_inline rt_uint32_t platform_get_gic_dist_base(void)
 {
-    return GICV3_DISTRIBUTOR_BASEADDRESS;
+    return GICV3_DISTRIBUTOR_BASE_ADDR;
 }
+
+/* the basic constants and interfaces needed by gic */
+rt_inline uintptr_t platform_get_gic_redist_base(void)
+{
+    uintptr_t redis_base, mpidr_aff, gicr_typer_aff;
+    mpidr_aff = (uintptr_t)(GetAffinity() & 0xfff);
+
+    for (redis_base = GICV3_RD_BASE_ADDR; redis_base < GICV3_RD_BASE_ADDR + GICV3_RD_SIZE; redis_base += GICV3_RD_OFFSET)
+    {
+#ifdef RT_USING_SMART
+        uintptr_t redis_base_virtual = (uintptr_t)rt_ioremap((void *)redis_base, GICV3_RD_OFFSET);
+        if (redis_base_virtual == 0)
+        {
+            continue;
+        }
+#if defined(TARGET_ARMV8_AARCH64)
+        gicr_typer_aff = GIC_RDIST_TYPER(redis_base_virtual) >> 32;
+#else
+        gicr_typer_aff = GIC_RDIST_TYPER(redis_base_virtual + 0x4);
+#endif
+        if (mpidr_aff == gicr_typer_aff)
+        {
+            return redis_base_virtual;
+        }
+        else
+        {
+            rt_iounmap(redis_base_virtual);
+        }
+#else
+#if defined(TARGET_ARMV8_AARCH64)
+        gicr_typer_aff = GIC_RDIST_TYPER(redis_base) >> 32;
+#else
+        gicr_typer_aff = GIC_RDIST_TYPER(redis_base + 0x4);
+#endif
+        if (mpidr_aff == gicr_typer_aff)
+        {
+            return redis_base;
+        }
+#endif
+    }
+
+    return 0;
+}
+
 
 #if defined(TARGET_ARMV8_AARCH64)
 
-/* the basic constants and interfaces needed by gic */
-rt_inline rt_uint32_t platform_get_gic_redist_base(void)
-{
-    extern int phytium_cpu_id(void);
-
-    s32 cpu_offset = 0;
-#if defined(FT_GIC_REDISTRUBUTIOR_OFFSET)
-    cpu_offset = FT_GIC_REDISTRUBUTIOR_OFFSET ;
-#endif
-
-#if defined(TARGET_E2000Q)
-    u32 cpu_id = 0;
-    cpu_id = phytium_cpu_id();
-
-    switch (cpu_id)
-    {
-    case 0:
-    case 1:
-        cpu_offset = 2;
-        break;
-    case 2:
-    case 3:
-        cpu_offset = -2;
-    default:
-        break;
-    }
-#endif
-
-    rt_kprintf("offset  is %x\n",  cpu_offset);
-    return (GICV3_RD_BASEADDRESS + (cpu_offset) * GICV3_RD_OFFSET);
-}
-
 rt_inline rt_uint32_t platform_get_gic_cpu_base(void)
 {
-    return 0U; /* unused in gicv3 */
+    return 0; /* unused in gicv3 */
 }
 
 #endif
 
 
 int phytium_cpu_id_mapping(int cpu_id);
-
-
 
 #endif // !

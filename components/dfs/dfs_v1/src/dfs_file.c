@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006-2021, RT-Thread Development Team
+ * Copyright (c) 2006-2024 RT-Thread Development Team
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -18,10 +18,12 @@
 
 #define DFS_VNODE_HASH_NR 128
 
+/*dfs vnode manager, for saving and searching vnodes.*/
 struct dfs_vnode_mgr
 {
-    struct rt_mutex lock;
-    rt_list_t head[DFS_VNODE_HASH_NR];
+    struct rt_mutex lock; /* mutex for protecting dfs vnode lists */
+    rt_list_t head[DFS_VNODE_HASH_NR]; /* a group of dfs vnode lists, the dfs vnode is inserted to one of the lists
+                                        according to path string's hash-value mod DFS_VNODE_HASH_NR. */
 };
 
 static struct dfs_vnode_mgr dfs_fm;
@@ -36,6 +38,10 @@ void dfs_fm_unlock(void)
     rt_mutex_release(&dfs_fm.lock);
 }
 
+/**
+ * @brief Initialize dfs vnode manager structure, including a lock and hash tables for vnode.
+ *
+ */
 void dfs_vnode_mgr_init(void)
 {
     int i = 0;
@@ -47,10 +53,41 @@ void dfs_vnode_mgr_init(void)
     }
 }
 
+/**
+ * @brief Initialize a DFS vnode structure.
+ *
+ * @param vnode Pointer to the DFS vnode structure to be initialized.
+ *              The caller must ensure this is a valid, allocated structure.
+ * @param type The type of the vnode, representing its role or category (e.g., regular file, directory).
+ * @param fops Pointer to the file operations structure associated with this vnode.
+ *             This structure defines the behavior of the vnode for operations such as open, read, write, etc.
+ *             If `fops` is NULL, the vnode will have no associated file operations.
+ *
+ * @return 0 on success, or a negative error code on failure.
+ *
+ * @note The caller should ensure that:
+ *       - The `vnode` pointer is valid and properly allocated.
+ *       - The `fops` pointer (if not NULL) points to a valid `struct dfs_file_ops`
+ *         instance, where all necessary function pointers are properly set.
+ */
+int dfs_vnode_init(struct dfs_vnode *vnode, int type, const struct dfs_file_ops *fops)
+{
+    if (vnode)
+    {
+        rt_memset(vnode, 0, sizeof(struct dfs_vnode));
+        vnode->type = type;
+        vnode->fops = fops;
+
+        rt_list_init(&(vnode->list));
+        vnode->ref_count = 1;
+    }
+    return 0;
+}
+
 /* BKDR Hash Function */
 static unsigned int bkdr_hash(const char *str)
 {
-    unsigned int seed = 131; // 31 131 1313 13131 131313 etc..
+    unsigned int seed = 131; /* 31 131 1313 13131 131313 etc..*/
     unsigned int hash = 0;
 
     while (*str)
@@ -61,6 +98,22 @@ static unsigned int bkdr_hash(const char *str)
     return (hash % DFS_VNODE_HASH_NR);
 }
 
+/**
+ * @brief Find a DFS vnode by its path.
+ *
+ * This function searches for a vnode in the vnode hash table using the specified path.
+ * If found, it returns a pointer to the vnode and updates the hash head if required.
+ *
+ * @param path The file path to search for. This should be a valid null-terminated string.
+ * @param hash_head Pointer to a location where the hash table head associated with the vnode
+ *                  can be stored. This can be NULL if the hash head is not needed.
+ *
+ * @return Pointer to the DFS vnode if found, or NULL if no vnode matches the specified path.
+ *
+ * @note The caller must ensure that:
+ *       - The `path` pointer is valid and points to a properly null-terminated string.
+ *       - If `hash_head` is not NULL, it points to a valid location to store the hash head.
+ */
 static struct dfs_vnode *dfs_vnode_find(const char *path, rt_list_t **hash_head)
 {
     struct dfs_vnode *vnode = NULL;
@@ -88,7 +141,7 @@ static struct dfs_vnode *dfs_vnode_find(const char *path, rt_list_t **hash_head)
 }
 
 /**
- * @addtogroup FileApi
+ * @addtogroup group_FileApi
  * @{
  */
 
@@ -295,13 +348,6 @@ int dfs_file_close(struct dfs_file *fd)
             result = vnode->fops->close(fd);
         }
 
-        /* close fd error, return */
-        if (result < 0)
-        {
-            dfs_fm_unlock();
-            return result;
-        }
-
         if (vnode->ref_count == 1)
         {
             /* remove from hash */
@@ -322,11 +368,12 @@ int dfs_file_close(struct dfs_file *fd)
 }
 
 /**
- * this function will perform a io control on a file descriptor.
+ * this function will perform an io control on a file descriptor.
  *
  * @param fd the file descriptor.
  * @param cmd the command to send to file descriptor.
  * @param args the argument to send to file descriptor.
+ *        - When `cmd` is `F_SETFL`, an additional integer argument specifies the new status flags.
  *
  * @return 0 on successful, -1 on failed.
  */
@@ -375,7 +422,7 @@ int dfs_file_ioctl(struct dfs_file *fd, int cmd, void *args)
  *
  * @return the actual read data bytes or 0 on end of file or failed.
  */
-int dfs_file_read(struct dfs_file *fd, void *buf, size_t len)
+ssize_t dfs_file_read(struct dfs_file *fd, void *buf, size_t len)
 {
     int result = 0;
 
@@ -489,7 +536,7 @@ __exit:
  *
  * @return the actual written data length.
  */
-int dfs_file_write(struct dfs_file *fd, const void *buf, size_t len)
+ssize_t dfs_file_write(struct dfs_file *fd, const void *buf, size_t len)
 {
     if (fd == NULL)
     {
@@ -530,7 +577,7 @@ int dfs_file_flush(struct dfs_file *fd)
  *
  * @return the current position after seek.
  */
-int dfs_file_lseek(struct dfs_file *fd, off_t offset)
+off_t dfs_file_lseek(struct dfs_file *fd, off_t offset)
 {
     int result;
 
@@ -577,39 +624,23 @@ int dfs_file_stat(const char *path, struct stat *buf)
         return -ENOENT;
     }
 
-    if ((fullpath[0] == '/' && fullpath[1] == '\0') ||
-        (dfs_subdir(fs->path, fullpath) == NULL))
+    if (fs->ops->stat == NULL)
     {
-        /* it's the root directory */
-        buf->st_dev   = 0;
-
-        buf->st_mode  = S_IRUSR | S_IRGRP | S_IROTH |
-                        S_IWUSR | S_IWGRP | S_IWOTH;
-        buf->st_mode |= S_IFDIR | S_IXUSR | S_IXGRP | S_IXOTH;
-
-        buf->st_size    = 0;
-        buf->st_mtime   = 0;
-
-        /* release full path */
         rt_free(fullpath);
+        LOG_E("the filesystem didn't implement this function");
 
-        return RT_EOK;
+        return -ENOSYS;
+    }
+    /* get the real file path and get file stat */
+    if (fs->ops->flags & DFS_FS_FLAG_FULLPATH)
+    {
+        result = fs->ops->stat(fs, fullpath, buf);
     }
     else
     {
-        if (fs->ops->stat == NULL)
-        {
-            rt_free(fullpath);
-            LOG_E("the filesystem didn't implement this function");
-
-            return -ENOSYS;
-        }
-
-        /* get the real file path and get file stat */
-        if (fs->ops->flags & DFS_FS_FLAG_FULLPATH)
-            result = fs->ops->stat(fs, fullpath, buf);
-        else
-            result = fs->ops->stat(fs, dfs_subdir(fs->path, fullpath), buf);
+        const char *subdir = dfs_subdir(fs->path, fullpath);
+        subdir = subdir ? subdir : "/";
+        result = fs->ops->stat(fs, subdir, buf);
     }
 
     rt_free(fullpath);
@@ -722,6 +753,7 @@ int dfs_file_ftruncate(struct dfs_file *fd, off_t length)
     return result;
 }
 
+#ifdef RT_USING_SMART
 int dfs_file_mmap2(struct dfs_file *fd, struct dfs_mmap2_args *mmap2)
 {
     int ret = 0;
@@ -745,6 +777,7 @@ int dfs_file_mmap2(struct dfs_file *fd, struct dfs_mmap2_args *mmap2)
 
     return ret;
 }
+#endif
 
 #ifdef RT_USING_FINSH
 #include <finsh.h>
@@ -853,7 +886,7 @@ void cat(const char *filename)
         {
             buffer[length] = '\0';
             rt_device_t out_device = rt_console_get_device();
-            rt_device_write(out_device, 0, (void *)buffer, sizeof(buffer));
+            rt_device_write(out_device, 0, (void *)buffer, length);
         }
     } while (length > 0);
     rt_kprintf("\n");
@@ -888,7 +921,7 @@ static void copyfile(const char *src, const char *dst)
         return;
     }
     fd_init(&fd);
-    if (dfs_file_open(&fd, dst, O_WRONLY | O_CREAT) < 0)
+    if (dfs_file_open(&fd, dst, O_WRONLY | O_CREAT | O_TRUNC) < 0)
     {
         rt_free(block_ptr);
         dfs_file_close(&src_fd);
@@ -1033,14 +1066,14 @@ void copy(const char *src, const char *dst)
             flag |= FLAG_DST_IS_FILE;
     }
 
-    //2. check status
+    /*2. check status*/
     if ((flag & FLAG_SRC_IS_DIR) && (flag & FLAG_DST_IS_FILE))
     {
         rt_kprintf("cp faild, cp dir to file is not permitted!\n");
         return ;
     }
 
-    //3. do copy
+    /*3. do copy*/
     if (flag & FLAG_SRC_IS_FILE)
     {
         if (flag & FLAG_DST_IS_DIR)
@@ -1060,7 +1093,7 @@ void copy(const char *src, const char *dst)
             copyfile(src, dst);
         }
     }
-    else //flag & FLAG_SRC_IS_DIR
+    else /*flag & FLAG_SRC_IS_DIR*/
     {
         if (flag & FLAG_DST_IS_DIR)
         {

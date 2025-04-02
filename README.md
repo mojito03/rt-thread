@@ -11,7 +11,8 @@
 [![Gitter](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/RT-Thread/rt-thread?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
 [![GitHub pull-requests](https://img.shields.io/github/issues-pr/RT-Thread/rt-thread.svg)](https://github.com/RT-Thread/rt-thread/pulls)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat)](https://github.com/RT-Thread/rt-thread/pulls)
-
+[![RT-Thread BSP Static Build Check](https://github.com/RT-Thread/rt-thread/actions/workflows/bsp_buildings.yml/badge.svg)](https://github.com/RT-Thread/rt-thread/actions/workflows/bsp_buildings.yml)
+<a href="https://hellogithub.com/repository/5816fc3c1e714d109631ceb377538ca9" target="_blank"><img src="https://api.hellogithub.com/v1/widgets/recommend.svg?rid=5816fc3c1e714d109631ceb377538ca9&claim_uid=kVCe5FXIMGAjJfy" alt="Featured｜HelloGitHub" style="width: 100px; height: 20px;" width="250" height="54" /></a>
 # RT-Thread
 
 RT-Thread was born in 2006, it is an open source, neutral, and community-based real-time operating system (RTOS).
@@ -53,7 +54,7 @@ It includes:
 
 | Name          | Description                                             |
 | ------------- | ------------------------------------------------------- |
-| BSP          | Board Support Package based on the porting of various development boards |
+| bsp        | Board Support Package based on the porting of various development boards |
 | components    | Components, such as finsh shell, file system, protocol stack etc. |
 | documentation | Related documents, like coding style, doxygen etc.        |
 | examples      | Related sample code                                     |
@@ -82,7 +83,7 @@ RT-Thread supports many architectures, and has covered the major architectures i
 - **ARM9**：manufacturers like Allwinner、Xilinx 、GOKE
 - **ARM11**：manufacturers like Fullhan
 - **MIPS32**：manufacturers like loongson、Ingenic
-- **RISC-V RV32E/RV32I[F]/RV64[D]**：manufacturers like sifive、[Canaan Kendryte](https://github.com/RT-Thread/rt-thread/tree/master/bsp/k210)、[bouffalo_lab](https://github.com/RT-Thread/rt-thread/tree/master/bsp/bouffalo_lab)、[Nuclei](https://nucleisys.com/)、[T-Head](https://www.t-head.cn/)
+- **RISC-V RV32E/RV32I[F]/RV64[D]**：manufacturers like sifive、[Canaan Kendryte](https://github.com/RT-Thread/rt-thread/tree/master/bsp/k210)、[bouffalo_lab](https://github.com/RT-Thread/rt-thread/tree/master/bsp/bouffalo_lab)、[Nuclei](https://nucleisys.com/)、[T-Head](https://www.t-head.cn/)、[HPMicro](https://github.com/RT-Thread/rt-thread/tree/master/bsp/hpmicro)
 - **ARC**：manufacturers like SYNOPSYS
 - **DSP**：manufacturers like TI
 - **C-Sky**
@@ -107,7 +108,7 @@ RT-Thread Studio IDE (a.k.a. RT-Studio) is a one-stop intergrated development en
 
 ## Env Tool
 
-[User Manual](documentation/env/env/) | [Tutorial Videos](https://www.youtube.com/watch?v=dEK94o_YoSo)
+[User Manual](documentation/env/env.md) | [Tutorial Videos](https://www.youtube.com/watch?v=dEK94o_YoSo)
 
 In the early stage, RT-Thread team also created an auxiliary tool called Env. It is an auxiliary tool with a TUI (Text-based user interface). Developers can use Env tool to configure and generate the GCC, Keil MDK, and IAR projects.
 
@@ -122,7 +123,7 @@ Based on [STM32F103 BluePill](https://github.com/RT-Thread/rt-thread/tree/master
 ## Simulator
 
 RT-Thread BSP can be compiled directly and downloaded to the corresponding development board for use. In addition, RT-Thread also provides qemu-vexpress-a9 BSP, which can be used without hardware platform. See the getting started guide below for details. Getting Started of QEMU with Env:
-[Windows](documentation/quick-start/quick_start_qemu/quick_start_qemu.md) | [Linux Ubuntu](documentation/quick-start/quick_start_qemu/quick_start_qemu_linux.md) | [Mac OS](documentation/quick-start/quick_start_qemu/quick_start_qemu_macos.md)
+[Windows](documentation/2.quick-start/quick_start_qemu/quick_start_qemu_windows.md) | [Linux Ubuntu](documentation/2.quick-start/quick_start_qemu/quick_start_qemu_linux.md) | [Mac OS](documentation/2.quick-start/quick_start_qemu/quick_start_qemu_macos.md)
 
 # License
 
@@ -144,7 +145,7 @@ RT-Thread is very grateful for the support from all community developers, and if
 
 # Contribution
 
-If you are interested in RT-Thread and want to join in the development of RT-Thread and become a code contributor,please refer to the [Code Contribution Guide](documentation/contribution_guide/contribution_guide.md).
+If you are interested in RT-Thread and want to join in the development of RT-Thread and become a code contributor,please refer to the [Code Contribution Guide](.github/CONTRIBUTING.md).
 
 ## Thanks for the following contributors!
 

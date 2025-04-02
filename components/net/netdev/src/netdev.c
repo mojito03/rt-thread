@@ -6,6 +6,7 @@
  * Change Logs:
  * Date           Author       Notes
  * 2019-03-18     ChenYong     First version
+ * 2025-01-04     Evlers       add statistics and more inupt parameters to ping command
  */
 
 #include <stdio.h>
@@ -27,10 +28,19 @@
 #define DBG_LVL              DBG_INFO
 #include <rtdbg.h>
 
+#if defined(SAL_USING_AF_NETLINK)
+#include <route_netlink.h>
+#endif
+
 /* The list of network interface device */
 struct netdev *netdev_list = RT_NULL;
 /* The default network interface device */
 struct netdev *netdev_default = RT_NULL;
+/* The global network register callback */
+static netdev_callback_fn g_netdev_register_callback = RT_NULL;
+static netdev_callback_fn g_netdev_default_change_callback = RT_NULL;
+static RT_DEFINE_SPINLOCK(_spinlock);
+static int netdev_num;
 
 /**
  * This function will register network interface device and
@@ -45,7 +55,6 @@ struct netdev *netdev_default = RT_NULL;
  */
 int netdev_register(struct netdev *netdev, const char *name, void *user_data)
 {
-    rt_base_t level;
     rt_uint16_t flags_mask;
     rt_uint16_t index;
 
@@ -93,12 +102,11 @@ int netdev_register(struct netdev *netdev, const char *name, void *user_data)
     /* initialize current network interface device single list */
     rt_slist_init(&(netdev->list));
 
-    level = rt_hw_interrupt_disable();
+    rt_spin_lock(&_spinlock);
 
     if (netdev_list == RT_NULL)
     {
         netdev_list = netdev;
-        netdev_default = netdev;
     }
     else
     {
@@ -106,7 +114,25 @@ int netdev_register(struct netdev *netdev, const char *name, void *user_data)
         rt_slist_append(&(netdev_list->list), &(netdev->list));
     }
 
-    rt_hw_interrupt_enable(level);
+    netdev_num++;
+    netdev->ifindex = netdev_num;
+
+    rt_spin_unlock(&_spinlock);
+
+    if (netdev_default == RT_NULL)
+    {
+        netdev_set_default(netdev_list);
+    }
+
+    /* execute netdev register callback */
+    if (g_netdev_register_callback)
+    {
+        g_netdev_register_callback(netdev, NETDEV_CB_REGISTER);
+    }
+
+#if defined(SAL_USING_AF_NETLINK)
+    rtnl_ip_notify(netdev, RTM_NEWLINK);
+#endif
 
     return RT_EOK;
 }
@@ -122,7 +148,6 @@ int netdev_register(struct netdev *netdev, const char *name, void *user_data)
  */
 int netdev_unregister(struct netdev *netdev)
 {
-    rt_base_t level;
     rt_slist_t *node = RT_NULL;
     struct netdev *cur_netdev = RT_NULL;
 
@@ -133,7 +158,7 @@ int netdev_unregister(struct netdev *netdev)
         return -RT_ERROR;
     }
 
-    level = rt_hw_interrupt_disable();
+    rt_spin_lock(&_spinlock);
 
     for (node = &(netdev_list->list); node; node = rt_slist_next(node))
     {
@@ -141,9 +166,17 @@ int netdev_unregister(struct netdev *netdev)
         if (cur_netdev == netdev)
         {
             /* find this network interface device in network interface device list */
-            if (netdev_list == netdev && rt_slist_next(&netdev_list->list) == RT_NULL)
+            if (netdev_list == netdev)
             {
-                netdev_list = RT_NULL;
+                rt_slist_t *next = rt_slist_next(node);
+                if (next)
+                {
+                    netdev_list = rt_slist_entry(next, struct netdev, list);
+                }
+                else
+                {
+                    netdev_list = RT_NULL;
+                }
             }
             else
             {
@@ -151,12 +184,21 @@ int netdev_unregister(struct netdev *netdev)
             }
             if (netdev_default == netdev)
             {
-                netdev_default = netdev_list;
+                netdev_default = RT_NULL;
             }
             break;
         }
     }
-    rt_hw_interrupt_enable(level);
+    rt_spin_unlock(&_spinlock);
+
+#if defined(SAL_USING_AF_NETLINK)
+    rtnl_ip_notify(netdev, RTM_DELLINK);
+#endif
+
+    if (netdev_default == RT_NULL)
+    {
+        netdev_set_default(netdev_list);
+    }
 
     if (cur_netdev == netdev)
     {
@@ -171,6 +213,17 @@ int netdev_unregister(struct netdev *netdev)
 }
 
 /**
+ * This function will set register callback
+ *
+ * @param register_callback the network register callback
+ *
+ */
+void netdev_set_register_callback(netdev_callback_fn register_callback)
+{
+    g_netdev_register_callback = register_callback;
+}
+
+/**
  * This function will get the first network interface device
  * with the flags in network interface device list.
  *
@@ -181,7 +234,6 @@ int netdev_unregister(struct netdev *netdev)
  */
 struct netdev *netdev_get_first_by_flags(uint16_t flags)
 {
-    rt_base_t level;
     rt_slist_t *node = RT_NULL;
     struct netdev *netdev = RT_NULL;
 
@@ -190,19 +242,19 @@ struct netdev *netdev_get_first_by_flags(uint16_t flags)
         return RT_NULL;
     }
 
-    level = rt_hw_interrupt_disable();
+    rt_spin_lock(&_spinlock);
 
     for (node = &(netdev_list->list); node; node = rt_slist_next(node))
     {
         netdev = rt_slist_entry(node, struct netdev, list);
         if (netdev && (netdev->flags & flags) != 0)
         {
-            rt_hw_interrupt_enable(level);
+            rt_spin_unlock(&_spinlock);
             return netdev;
         }
     }
 
-    rt_hw_interrupt_enable(level);
+    rt_spin_unlock(&_spinlock);
 
     return RT_NULL;
 }
@@ -218,7 +270,6 @@ struct netdev *netdev_get_first_by_flags(uint16_t flags)
  */
 struct netdev *netdev_get_by_ipaddr(ip_addr_t *ip_addr)
 {
-    rt_base_t level;
     rt_slist_t *node = RT_NULL;
     struct netdev *netdev = RT_NULL;
 
@@ -227,19 +278,19 @@ struct netdev *netdev_get_by_ipaddr(ip_addr_t *ip_addr)
         return RT_NULL;
     }
 
-    level = rt_hw_interrupt_disable();
+    rt_spin_lock(&_spinlock);
 
     for (node = &(netdev_list->list); node; node = rt_slist_next(node))
     {
         netdev = rt_slist_entry(node, struct netdev, list);
         if (netdev && ip_addr_cmp(&(netdev->ip_addr), ip_addr))
         {
-            rt_hw_interrupt_enable(level);
+            rt_spin_unlock(&_spinlock);
             return netdev;
         }
     }
 
-    rt_hw_interrupt_enable(level);
+    rt_spin_unlock(&_spinlock);
 
     return RT_NULL;
 }
@@ -255,7 +306,6 @@ struct netdev *netdev_get_by_ipaddr(ip_addr_t *ip_addr)
  */
 struct netdev *netdev_get_by_name(const char *name)
 {
-    rt_base_t level;
     rt_slist_t *node = RT_NULL;
     struct netdev *netdev = RT_NULL;
 
@@ -264,19 +314,55 @@ struct netdev *netdev_get_by_name(const char *name)
         return RT_NULL;
     }
 
-    level = rt_hw_interrupt_disable();
+    rt_spin_lock(&_spinlock);
 
     for (node = &(netdev_list->list); node; node = rt_slist_next(node))
     {
         netdev = rt_slist_entry(node, struct netdev, list);
-        if (netdev && (rt_strncmp(netdev->name, name, rt_strlen(netdev->name) < RT_NAME_MAX ? rt_strlen(netdev->name) : RT_NAME_MAX) == 0))
+        if (netdev && (rt_strncmp(netdev->name, name, rt_strlen(name) < RT_NAME_MAX ? rt_strlen(name) : RT_NAME_MAX) == 0))
         {
-            rt_hw_interrupt_enable(level);
+            rt_spin_unlock(&_spinlock);
             return netdev;
         }
     }
 
-    rt_hw_interrupt_enable(level);
+    rt_spin_unlock(&_spinlock);
+
+    return RT_NULL;
+}
+
+/**
+ * This function will get network interface device
+ * in network interface device list by netdev ifindex.
+ *
+ * @param ifindex the ifindex of network interface device
+ *
+ * @return != NULL: network interface device object
+ *            NULL: get failed
+ */
+struct netdev *netdev_get_by_ifindex(int ifindex)
+{
+    rt_slist_t *node = RT_NULL;
+    struct netdev *netdev = RT_NULL;
+
+    if (netdev_list == RT_NULL)
+    {
+        return RT_NULL;
+    }
+
+    rt_spin_lock(&_spinlock);
+
+    for (node = &(netdev_list->list); node; node = rt_slist_next(node))
+    {
+        netdev = rt_slist_entry(node, struct netdev, list);
+        if (netdev && (netdev->ifindex == ifindex))
+        {
+            rt_spin_unlock(&_spinlock);
+            return netdev;
+        }
+    }
+
+    rt_spin_unlock(&_spinlock);
 
     return RT_NULL;
 }
@@ -293,7 +379,6 @@ struct netdev *netdev_get_by_name(const char *name)
  */
 struct netdev *netdev_get_by_family(int family)
 {
-    rt_base_t level;
     rt_slist_t *node = RT_NULL;
     struct netdev *netdev = RT_NULL;
     struct sal_proto_family *pf = RT_NULL;
@@ -303,7 +388,7 @@ struct netdev *netdev_get_by_family(int family)
         return RT_NULL;
     }
 
-    level = rt_hw_interrupt_disable();
+    rt_spin_lock(&_spinlock);
 
     for (node = &(netdev_list->list); node; node = rt_slist_next(node))
     {
@@ -311,7 +396,7 @@ struct netdev *netdev_get_by_family(int family)
         pf = (struct sal_proto_family *) netdev->sal_user_data;
         if (pf && pf->skt_ops && pf->family == family && netdev_is_up(netdev))
         {
-            rt_hw_interrupt_enable(level);
+            rt_spin_unlock(&_spinlock);
             return netdev;
         }
     }
@@ -322,12 +407,12 @@ struct netdev *netdev_get_by_family(int family)
         pf = (struct sal_proto_family *) netdev->sal_user_data;
         if (pf && pf->skt_ops && pf->sec_family == family && netdev_is_up(netdev))
         {
-            rt_hw_interrupt_enable(level);
+            rt_spin_unlock(&_spinlock);
             return netdev;
         }
     }
 
-    rt_hw_interrupt_enable(level);
+    rt_spin_unlock(&_spinlock);
 
     return RT_NULL;
 }
@@ -348,6 +433,44 @@ int netdev_family_get(struct netdev *netdev)
 
 #endif /* RT_USING_SAL */
 
+#if defined(SAL_USING_AF_NETLINK)
+int netdev_getnetdev(struct msg_buf *msg, int (*cb)(struct msg_buf *m_buf, struct netdev *nd, int nd_num, int index, int ipvx))
+{
+    struct netdev *cur_nd_list = netdev_list;
+    struct netdev *nd_node;
+    int nd_num = 0;
+    int err = 0;
+
+    if (cur_nd_list == RT_NULL)
+        return 0;
+
+    rt_spin_lock(&_spinlock);
+    nd_num = rt_slist_len(&cur_nd_list->list) + 1;
+    rt_spin_unlock(&_spinlock);
+
+    err = cb(msg, cur_nd_list, nd_num, nd.ifindex, ROUTE_IPV4_TRUE);
+    if (err < 0)
+        return err;
+
+
+    rt_spin_lock(&_spinlock);
+    rt_slist_for_each_entry(nd_node, &(cur_nd_list->list), list)
+    {
+        rt_spin_unlock(&_spinlock);
+        err = cb(msg, nd_node, nd_num, nd.ifindex, ROUTE_IPV4_TRUE);
+        if (err < 0)
+        {
+            return err;
+        }
+
+        rt_spin_lock(&_spinlock);
+    }
+    rt_spin_unlock(&_spinlock);
+
+    return 0;
+}
+#endif
+
 /**
  * This function will set default network interface device.
  *
@@ -355,17 +478,34 @@ int netdev_family_get(struct netdev *netdev)
  */
 void netdev_set_default(struct netdev *netdev)
 {
-    if (netdev)
+    if (netdev && (netdev != netdev_default))
     {
         netdev_default = netdev;
 
-        if (netdev->ops->set_default)
+        /* execture the default network interface device in the current network stack */
+        if (netdev->ops && netdev->ops->set_default)
         {
-            /* set default network interface device in the current network stack */
             netdev->ops->set_default(netdev);
+        }
+
+        /* execture application netdev default change callback */
+        if (g_netdev_default_change_callback)
+        {
+            g_netdev_default_change_callback(netdev, NETDEV_CB_DEFAULT_CHANGE);
         }
         LOG_D("Setting default network interface device name(%s) successfully.", netdev->name);
     }
+}
+
+/**
+ * This function will set defalut netdev change callback
+ *
+ * @param register_callback the network default change callback
+ *
+ */
+void netdev_set_default_change_callback(netdev_callback_fn register_callback)
+{
+    g_netdev_default_change_callback = register_callback;
 }
 
 /**
@@ -378,6 +518,8 @@ void netdev_set_default(struct netdev *netdev)
  */
 int netdev_set_up(struct netdev *netdev)
 {
+    int err = 0;
+
     RT_ASSERT(netdev);
 
     if (!netdev->ops || !netdev->ops->set_up)
@@ -393,7 +535,14 @@ int netdev_set_up(struct netdev *netdev)
     }
 
     /* execute enable network interface device operations by network interface device driver */
-    return netdev->ops->set_up(netdev);
+    err = netdev->ops->set_up(netdev);
+
+#if defined(SAL_USING_AF_NETLINK)
+    if (err)
+        rtnl_ip_notify(netdev, RTM_NEWLINK);
+#endif
+
+    return err;
 }
 /**
  * This function will disable network interface device.
@@ -405,6 +554,8 @@ int netdev_set_up(struct netdev *netdev)
  */
 int netdev_set_down(struct netdev *netdev)
 {
+    int err;
+
     RT_ASSERT(netdev);
 
     if (!netdev->ops || !netdev->ops->set_down)
@@ -420,7 +571,13 @@ int netdev_set_down(struct netdev *netdev)
     }
 
     /* execute disable network interface device operations by network interface driver */
-    return netdev->ops->set_down(netdev);
+    err = netdev->ops->set_down(netdev);
+#if defined(SAL_USING_AF_NETLINK)
+    if (err)
+        rtnl_ip_notify(netdev, RTM_NEWLINK);
+#endif
+
+    return err;
 }
 
 /**
@@ -463,6 +620,7 @@ int netdev_dhcp_enabled(struct netdev *netdev, rt_bool_t is_enabled)
  */
 int netdev_set_ipaddr(struct netdev *netdev, const ip_addr_t *ip_addr)
 {
+    int err;
     RT_ASSERT(netdev);
     RT_ASSERT(ip_addr);
 
@@ -479,7 +637,15 @@ int netdev_set_ipaddr(struct netdev *netdev, const ip_addr_t *ip_addr)
     }
 
      /* execute network interface device set IP address operations */
-    return netdev->ops->set_addr_info(netdev, (ip_addr_t *)ip_addr, RT_NULL, RT_NULL);
+    err = netdev->ops->set_addr_info(netdev, (ip_addr_t *)ip_addr, RT_NULL, RT_NULL);
+
+#if defined(SAL_USING_AF_NETLINK)
+    if (err == 0)
+        rtnl_ip_notify(netdev, RTM_SETLINK);
+#endif
+
+
+    return err;
 }
 
 /**
@@ -1121,8 +1287,9 @@ int netdev_cmd_ping(char* target_name, char *netdev_name, rt_uint32_t times, rt_
 
     struct netdev *netdev = RT_NULL;
     struct netdev_ping_resp ping_resp;
-    rt_uint32_t index;
+    rt_uint32_t index, received, loss, max_time, min_time, avg_time;
     int ret = 0;
+    rt_bool_t isbind = RT_FALSE;
 
     if (size == 0)
     {
@@ -1132,6 +1299,7 @@ int netdev_cmd_ping(char* target_name, char *netdev_name, rt_uint32_t times, rt_
     if (netdev_name != RT_NULL)
     {
         netdev = netdev_get_by_name(netdev_name);
+        isbind = RT_TRUE;
     }
 
     if (netdev == RT_NULL)
@@ -1142,8 +1310,6 @@ int netdev_cmd_ping(char* target_name, char *netdev_name, rt_uint32_t times, rt_
 
     if (!NETDEV_PING_IS_COMMONICABLE(netdev))
     {
-        /* using first internet up status network interface device */
-        netdev = netdev_get_first_by_flags(NETDEV_FLAG_LINK_UP);
         if (netdev == RT_NULL)
         {
             rt_kprintf("ping: not found available network interface device.\n");
@@ -1161,6 +1327,8 @@ int netdev_cmd_ping(char* target_name, char *netdev_name, rt_uint32_t times, rt_
         }
     }
 
+    max_time = avg_time = received = 0;
+    min_time = 0xFFFFFFFF;
     for (index = 0; index < times; index++)
     {
         int delay_tick = 0;
@@ -1168,11 +1336,11 @@ int netdev_cmd_ping(char* target_name, char *netdev_name, rt_uint32_t times, rt_
 
         rt_memset(&ping_resp, 0x00, sizeof(struct netdev_ping_resp));
         start_tick = rt_tick_get();
-        ret = netdev->ops->ping(netdev, (const char *)target_name, size, NETDEV_PING_RECV_TIMEO, &ping_resp);
+        ret = netdev->ops->ping(netdev, (const char *)target_name, size, NETDEV_PING_RECV_TIMEO, &ping_resp, isbind);
         if (ret == -RT_ETIMEOUT)
         {
             rt_kprintf("ping: from %s icmp_seq=%d timeout\n",
-                (ip_addr_isany(&(ping_resp.ip_addr))) ? target_name : inet_ntoa(ping_resp.ip_addr), index);
+                (ip_addr_isany(&(ping_resp.ip_addr))) ? target_name : inet_ntoa(ping_resp.ip_addr), index + 1);
         }
         else if (ret == -RT_ERROR)
         {
@@ -1185,18 +1353,51 @@ int netdev_cmd_ping(char* target_name, char *netdev_name, rt_uint32_t times, rt_
             if (ping_resp.ttl == 0)
             {
                 rt_kprintf("%d bytes from %s icmp_seq=%d time=%d ms\n",
-                            ping_resp.data_len, inet_ntoa(ping_resp.ip_addr), index, ping_resp.ticks);
+                            ping_resp.data_len, inet_ntoa(ping_resp.ip_addr), index + 1, ping_resp.ticks);
             }
             else
             {
                 rt_kprintf("%d bytes from %s icmp_seq=%d ttl=%d time=%d ms\n",
-                            ping_resp.data_len, inet_ntoa(ping_resp.ip_addr), index, ping_resp.ttl, ping_resp.ticks);
+                            ping_resp.data_len, inet_ntoa(ping_resp.ip_addr), index + 1, ping_resp.ttl, ping_resp.ticks);
             }
+            received += 1;
+            if (ping_resp.ticks > max_time)
+            {
+                max_time = ping_resp.ticks;
+            }
+            else if (ping_resp.ticks < min_time)
+            {
+                min_time = ping_resp.ticks;
+            }
+            avg_time += ping_resp.ticks;
         }
 
         /* if the response time is more than NETDEV_PING_DELAY, no need to delay */
         delay_tick = ((rt_tick_get() - start_tick) > NETDEV_PING_DELAY) || (index == times) ? 0 : NETDEV_PING_DELAY;
         rt_thread_delay(delay_tick);
+    }
+
+    /* print ping statistics */
+    loss = (uint32_t)((1 - ((float)received) / index) * 100);
+    avg_time = (uint32_t)(avg_time / received);
+#if NETDEV_IPV4 && NETDEV_IPV6
+    if (IP_IS_V4_VAL(&ping_resp.ip_addr))
+    {
+        rt_kprintf("\n--- %s ping statistics ---\n", inet_ntoa(*ip_2_ip4(&ping_resp.ip_addr)));
+    }
+    else
+    {
+        rt_kprintf("\n--- %s ping statistics ---\n", inet6_ntoa(*ip_2_ip6(&ping_resp.ip_addr)));
+    }
+#elif NETDEV_IPV4
+    rt_kprintf("\n--- %s ping statistics ---\n", inet_ntoa(ping_resp.ip_addr));
+#elif NETDEV_IPV6
+    rt_kprintf("\n--- %s ping statistics ---\n", inet6_ntoa(ping_resp.ip_addr));
+#endif
+    rt_kprintf("%d packets transmitted, %d received, %d%% packet loss\n", index, received, loss);
+    if (received > 0)
+    {
+        rt_kprintf("minimum = %dms, maximum = %dms, average = %dms\n", min_time, max_time, avg_time);
     }
 
     return RT_EOK;
@@ -1206,7 +1407,7 @@ int netdev_ping(int argc, char **argv)
 {
     if (argc == 1)
     {
-        rt_kprintf("Please input: ping <host address> [netdev name]\n");
+        rt_kprintf("Please input: ping <host address> [netdev name] [times] [data size]\n");
     }
     else if (argc == 2)
     {
@@ -1215,6 +1416,14 @@ int netdev_ping(int argc, char **argv)
     else if (argc == 3)
     {
         netdev_cmd_ping(argv[1], argv[2], 4, 0);
+    }
+    else if (argc == 4)
+    {
+        netdev_cmd_ping(argv[1], argv[2], atoi(argv[3]), 0);
+    }
+    else if (argc == 5)
+    {
+        netdev_cmd_ping(argv[1], argv[2], atoi(argv[3]), atoi(argv[4]));
     }
 
     return 0;

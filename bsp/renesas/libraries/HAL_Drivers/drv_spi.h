@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006-2021, RT-Thread Development Team
+ * Copyright (c) 2006-2025, RT-Thread Development Team
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -23,12 +23,16 @@
 extern "C" {
 #endif
 
-#ifdef R_SPI_H
+#if defined(R_SPI_H) || defined(R_SPI_API_H)
 struct ra_spi_handle
 {
     const char bus_name[RT_NAME_MAX];
-    const spi_cfg_t           *spi_cfg_t;
+    const spi_cfg_t  *spi_cfg_t;
+#if defined(R_SPI_API_H)
+    const spi_ctrl_t *spi_ctrl_t;
+#else
     const spi_instance_ctrl_t *spi_ctrl_t;
+#endif
 };
 
 struct ra_spi

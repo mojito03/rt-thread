@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006-2021, RT-Thread Development Team
+ * Copyright (c) 2006-2025, RT-Thread Development Team
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -13,7 +13,7 @@
 
 #include "drv_spi.h"
 
-#ifdef RT_USING_SPI
+#ifdef BSP_USING_SPI
 
 //#define DRV_DEBUG
 #define DBG_TAG              "drv.spi"
@@ -24,10 +24,19 @@
 #endif /* DRV_DEBUG */
 #include <rtdbg.h>
 
-#if defined(BSP_USING_SPI0) || defined(BSP_USING_SPI1)
+#if defined(BSP_USING_SPI0) || defined(BSP_USING_SPI1) || defined(BSP_USING_SPI2)
 #define RA_SPI0_EVENT 0x01
 #define RA_SPI1_EVENT 0x02
+#define RA_SPI2_EVENT 0x03
 static struct rt_event complete_event = {0};
+
+#ifdef SOC_SERIES_R7FA8M85
+#define R_SPI_Write R_SPI_B_Write
+#define R_SPI_Read  R_SPI_B_Read
+#define R_SPI_WriteRead R_SPI_B_WriteRead
+#define R_SPI_Open R_SPI_B_Open
+#define spi_extended_cfg_t spi_b_extended_cfg_t
+#endif
 
 static struct ra_spi_handle spi_handle[] =
 {
@@ -37,6 +46,10 @@ static struct ra_spi_handle spi_handle[] =
 
 #ifdef BSP_USING_SPI1
     {.bus_name = "spi1", .spi_ctrl_t = &g_spi1_ctrl, .spi_cfg_t = &g_spi1_cfg,},
+#endif
+
+#ifdef BSP_USING_SPI2
+    {.bus_name = "spi2", .spi_ctrl_t = &g_spi2_ctrl, .spi_cfg_t = &g_spi2_cfg,},
 #endif
 };
 
@@ -62,6 +75,16 @@ void spi1_callback(spi_callback_args_t *p_args)
     rt_interrupt_leave();
 }
 
+void spi2_callback(spi_callback_args_t *p_args)
+{
+    rt_interrupt_enter();
+    if (SPI_EVENT_TRANSFER_COMPLETE == p_args->event)
+    {
+        rt_event_send(&complete_event, RA_SPI2_EVENT);
+    }
+    rt_interrupt_leave();
+}
+
 static rt_err_t ra_wait_complete(rt_event_t event, const char bus_name[RT_NAME_MAX])
 {
     rt_uint32_t recved = 0x00;
@@ -71,7 +94,7 @@ static rt_err_t ra_wait_complete(rt_event_t event, const char bus_name[RT_NAME_M
         return rt_event_recv(event,
                              RA_SPI0_EVENT,
                              RT_EVENT_FLAG_OR | RT_EVENT_FLAG_CLEAR,
-                             RT_WAITING_FOREVER,
+                             (rt_int32_t)rt_tick_from_millisecond(200),
                              &recved);
     }
     else if (bus_name[3] == '1')
@@ -79,7 +102,15 @@ static rt_err_t ra_wait_complete(rt_event_t event, const char bus_name[RT_NAME_M
         return rt_event_recv(event,
                              RA_SPI1_EVENT,
                              RT_EVENT_FLAG_OR | RT_EVENT_FLAG_CLEAR,
-                             RT_WAITING_FOREVER,
+                             (rt_int32_t)rt_tick_from_millisecond(200),
+                             &recved);
+    }
+    else if (bus_name[3] == '2')
+    {
+        return rt_event_recv(event,
+                             RA_SPI2_EVENT,
+                             RT_EVENT_FLAG_OR | RT_EVENT_FLAG_CLEAR,
+                             (rt_int32_t)rt_tick_from_millisecond(200),
                              &recved);
     }
     return -RT_EINVAL;
@@ -156,6 +187,10 @@ static rt_err_t ra_write_read_message(struct rt_spi_device *device, struct rt_sp
         LOG_E("%s write and read failed.", spi_dev->ra_spi_handle_t->bus_name);
         return -RT_ERROR;
     }
+#if defined(SOC_SERIES_R9A07G0)
+    R_BSP_CacheCleanInvalidateAll();
+#endif
+
     /* Wait for SPI_EVENT_TRANSFER_COMPLETE callback event. */
     ra_wait_complete(&complete_event, spi_dev->ra_spi_handle_t->bus_name);
     return message->length;
@@ -177,13 +212,19 @@ static rt_err_t ra_hw_spi_configure(struct rt_spi_device *device,
     configuration->data_width = configuration->data_width / 8;
     spi_dev->rt_spi_cfg_t = configuration;
 
-    spi_extended_cfg_t *spi_cfg = (spi_extended_cfg_t *)spi_dev->ra_spi_handle_t->spi_cfg_t->p_extend;
+    spi_extended_cfg_t spi_cfg = *(spi_extended_cfg_t *)spi_dev->ra_spi_handle_t->spi_cfg_t->p_extend;
 
     /**< Configure Select Line */
     rt_pin_write(device->cs_pin, PIN_HIGH);
 
     /**< config bitrate */
-    R_SPI_CalculateBitrate(spi_dev->rt_spi_cfg_t->max_hz, &spi_cfg->spck_div);
+#ifdef SOC_SERIES_R7FA8M85
+    R_SPI_B_CalculateBitrate(spi_dev->rt_spi_cfg_t->max_hz, SPI_B_CLOCK_SOURCE_PCLK, &spi_cfg.spck_div);
+#elif defined(SOC_SERIES_R9A07G0)
+    R_SPI_CalculateBitrate(spi_dev->rt_spi_cfg_t->max_hz, SPI_CLOCK_SOURCE_PCLKM, &spi_cfg.spck_div);
+#else
+    R_SPI_CalculateBitrate(spi_dev->rt_spi_cfg_t->max_hz, &spi_cfg.spck_div);
+#endif
 
     /**< init */
     err = R_SPI_Open((spi_ctrl_t *)spi_dev->ra_spi_handle_t->spi_ctrl_t, (spi_cfg_t const * const)spi_dev->ra_spi_handle_t->spi_cfg_t);
@@ -269,7 +310,7 @@ int ra_hw_spi_init(void)
     }
     return RT_EOK;
 }
-INIT_BOARD_EXPORT(ra_hw_spi_init);
+INIT_DEVICE_EXPORT(ra_hw_spi_init);
 #endif
 /**
   * Attach the spi device to SPI bus, this function must be used after initialization.
@@ -298,4 +339,4 @@ rt_err_t rt_hw_spi_device_attach(const char *bus_name, const char *device_name, 
 
     return result;
 }
-#endif /* RT_USING_SPI */
+#endif /* BSP_USING_SPI */

@@ -18,8 +18,9 @@ void *rt_ioremap_start;
 size_t rt_ioremap_size;
 
 #ifdef RT_USING_SMART
-
 #include <lwp_mm.h>
+#endif
+
 #define DBG_TAG "mm.ioremap"
 #define DBG_LVL DBG_LOG
 #include <rtdbg.h>
@@ -33,17 +34,19 @@ enum ioremap_type
 
 static void *_ioremap_type(void *paddr, size_t size, enum ioremap_type type)
 {
-    void *v_addr = NULL;
+    char *v_addr = NULL;
     size_t attr;
     size_t lo_off;
     int err;
+    size_t pa_off = (rt_ubase_t)paddr & ~(RT_PAGE_AFFINITY_BLOCK_SIZE - 1);
 
-    lo_off = (uintptr_t)paddr & ARCH_PAGE_MASK;
+    lo_off = (rt_ubase_t)paddr - pa_off;
+    pa_off = MM_PA_TO_OFF(pa_off);
 
     struct rt_mm_va_hint hint = {
         .prefer = RT_NULL,
-        .map_size = RT_ALIGN(size + lo_off, ARCH_PAGE_SIZE),
-        .flags = 0,
+        .map_size = RT_ALIGN(size + lo_off, RT_PAGE_AFFINITY_BLOCK_SIZE),
+        .flags = MMF_CREATE(0, RT_PAGE_AFFINITY_BLOCK_SIZE),
         .limit_start = rt_ioremap_start,
         .limit_range_size = rt_ioremap_size,
     };
@@ -62,7 +65,7 @@ static void *_ioremap_type(void *paddr, size_t size, enum ioremap_type type)
     default:
         return v_addr;
     }
-    err = rt_aspace_map_phy(&rt_kernel_space, &hint, attr, MM_PA_TO_OFF(paddr), &v_addr);
+    err = rt_aspace_map_phy(&rt_kernel_space, &hint, attr, pa_off, (void **)&v_addr);
 
     if (err)
     {
@@ -74,6 +77,16 @@ static void *_ioremap_type(void *paddr, size_t size, enum ioremap_type type)
         v_addr = v_addr + lo_off;
     }
     return v_addr;
+}
+
+rt_weak void *rt_ioremap_early(void *paddr, size_t size)
+{
+    if (!size)
+    {
+        return RT_NULL;
+    }
+
+    return paddr;
 }
 
 void *rt_ioremap(void *paddr, size_t size)
@@ -101,23 +114,3 @@ void rt_iounmap(volatile void *vaddr)
     rt_aspace_unmap(&rt_kernel_space, (void *)vaddr);
 }
 
-#else
-void *rt_ioremap(void *paddr, size_t size)
-{
-    return paddr;
-}
-
-void *rt_ioremap_nocache(void *paddr, size_t size)
-{
-    return paddr;
-}
-
-void *rt_ioremap_cached(void *paddr, size_t size)
-{
-    return paddr;
-}
-
-void rt_iounmap(volatile void *vaddr)
-{
-}
-#endif

@@ -19,13 +19,13 @@ if  CROSS_TOOL == 'gcc':
     PLATFORM    = 'gcc'
     EXEC_PATH   = r'/opt/gcc-arm-none-eabi/bin/'
 elif CROSS_TOOL == 'keil':
-    PLATFORM    = 'armcc'
+    PLATFORM    = 'armclang'   #KEIL AC6
     EXEC_PATH   = r'C:/Keil_v5'
 elif CROSS_TOOL == 'iar':
     PLATFORM    = 'iccarm'
     EXEC_PATH   = r'C:/Program Files (x86)/IAR Systems/Embedded Workbench 8.3'
 
-if os.getenv('RTT_EXEC_PATH'):
+if os.getenv('RTT_EXEC_PATH') and (CROSS_TOOL == 'gcc'):
     EXEC_PATH = os.getenv('RTT_EXEC_PATH')
 
 BUILD = 'debug'
@@ -58,10 +58,11 @@ if PLATFORM == 'gcc':
         CFLAGS += ' -O2'
 
     CXXFLAGS = CFLAGS 
-    CFLAGS += ' -std=c99'
+    CFLAGS += ' -std=gnu99'
 
     POST_ACTION = OBJCPY + ' -O binary $TARGET rtthread.bin\n' + SIZE + ' $TARGET \n'
-
+    POST_ACTION += OBJCPY + ' -O ihex $TARGET rt-thread.hex\n'
+    
 elif PLATFORM == 'armcc':
     # toolchains
     CC = 'armcc'
@@ -90,7 +91,7 @@ elif PLATFORM == 'armcc':
         CFLAGS += ' -O2'
 
     CXXFLAGS = CFLAGS 
-    CFLAGS += ' -std=c99'
+    CFLAGS += ' -std=gnu99'
 
     POST_ACTION = 'fromelf --bin $TARGET --output rtthread.bin \nfromelf -z $TARGET'
 
@@ -124,7 +125,7 @@ elif PLATFORM == 'armclang':
         CFLAGS += ' -O2'
         
     CXXFLAGS = CFLAGS
-    CFLAGS += ' -std=c99'
+    CFLAGS += ' -std=gnu99'
 
     POST_ACTION = 'fromelf --bin $TARGET --output rtthread.bin \nfromelf -z $TARGET'
 

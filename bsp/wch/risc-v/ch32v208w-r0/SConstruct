@@ -24,7 +24,7 @@ env = Environment(tools = ['mingw'],
     AS = rtconfig.AS, ASFLAGS = rtconfig.AFLAGS,
     CC = rtconfig.CC, CFLAGS = rtconfig.CFLAGS,
     AR = rtconfig.AR, ARFLAGS = '-rc',
-    CXX = rtconfig.CXX,
+    CXX = rtconfig.CXX, CXXFLAGS = rtconfig.CXXFLAGS,
     LINK = rtconfig.LINK, LINKFLAGS = rtconfig.LFLAGS)
 env.PrependENVPath('PATH', rtconfig.EXEC_PATH)
 
@@ -53,10 +53,6 @@ ch32_library = 'ch32v20x_libraries'
 rtconfig.BSP_LIBRARY_TYPE = ch32_library
 
 bsp_vdir = 'build'
-library_vdir = 'build/libraries'
-
-# include libraries
-objs.extend(SConscript(os.path.join(libraries_path_prefix, ch32_library, 'SConscript'), variant_dir=library_vdir + '/ch32_library', duplicate=0))
 
 # common include drivers
 objs.extend(SConscript(os.path.join(libraries_path_prefix, 'ch32_drivers','SConscript')))

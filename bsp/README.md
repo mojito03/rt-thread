@@ -12,24 +12,7 @@ RT-THREAD bsp company list
 - STM32
   - [stm32](stm32) series
 - NXP
-  - [lpc55sxx](lpc55sxx) series
-  - [imxrt](imxrt) series
-  - [frdm-k64f](frdm-k64f)
-  - [imx6sx](imx6sx)
-  - [imx6ul](imx6ul)
-  - [lpc824](lpc824)
-  - [lpc54608-LPCXpresso](lpc54608-LPCXpresso)
-  - [lpc54114-lite](lpc54114-lite) 
-  - [lpc5410x](lpc5410x)
-  - [lpc43xx](lpc43xx)
-  - [lpc408x](lpc408x)
-  - [lpc2478](lpc2478)
-  - [lpc2148](lpc2148)
-  - [lpc178x](lpc178x)
-  - [lpc176x](lpc176x)
-  - [lpc1114](lpc1114)
-  - [xplorer4330](xplorer4330)
-  - [rv32m1_vega](rv32m1_vega)
+  - [nxp](nxp) series
 - Renesas
   - [renesas](renesas) series
   - [rx](rx) series
@@ -51,6 +34,7 @@ RT-THREAD bsp company list
   - [lm3s8962](lm3s8962)
   - [dm365](dm365)
   - [beaglebone](beaglebone)
+  - [msp432e401y-LaunchPad](msp432e401y-LaunchPad)
 - Samsung
   - [wh44b0](wh44b0)
   - [mini4020](mini4020)
@@ -96,13 +80,6 @@ RT-THREAD bsp company list
   - [mm32f103x](mm32f103x)
 - 兆易创新GD32
   - [gd32](gd32) series
-  - [gd32350r-eval](gd32350r-eval)
-  - [gd32450z-eval](gd32450z-eval)
-  - [gd32e230k-start](gd32e230k-start)
-  - [gd32vf103v-eval](gd32vf103v-eval)
-  - [gd32303e-eval](gd32303e-eval)
-  - [gd32107c-eval](gd32107c-eval)
-  - [gd32105c-eval](gd32105c-eval)
 - Realtek
   - [amebaz](amebaz)
 - 国民科技N32
@@ -177,3 +154,5 @@ RT-THREAD bsp company list
   - [CME_M7](CME_M7)
 - 好钜润 TIKY
   - [tkm32F499](tkm32F499)
+- Milk-V
+  - [cvitek](cvitek)

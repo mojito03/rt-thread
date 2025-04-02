@@ -7,13 +7,13 @@
  * Date           Author       Notes
  *2023-03-28      Zxy          first version
  */
-#ifdef RT_USING_I2C
+
 #include "drv_hw_i2c.h"
 #include "driver/i2c.h"//bsp/ESP32_C3/packages/ESP-IDF-latest/components/driver/include/driver/i2c.h
 #include "hal/i2c_types.h"//bsp/ESP32_C3/packages/ESP-IDF-latest/tools/mocks/hal/include/hal/i2c_types.h
 #include "esp_err.h"
 //#include "portmacro.h"//bsp/ESP32_C3/packages/FreeRTOS_Wrapper-latest/FreeRTOS/portable/rt-thread/portmacro.h
-
+#ifdef BSP_USING_HW_I2C
 struct esp32_i2c
 {
     struct rt_i2c_bus_device bus;
@@ -96,7 +96,7 @@ static rt_size_t _slave_xfer(struct rt_i2c_bus_device *bus, struct rt_i2c_msg ms
     return -RT_ENOSYS;
 }
 
-static rt_err_t _i2c_bus_control(struct rt_i2c_bus_device *bus, rt_uint32_t cmd, rt_uint32_t arg)
+static rt_err_t _i2c_bus_control(struct rt_i2c_bus_device *bus, int cmd, void *args)
 {
     return -RT_EINVAL;
 }
